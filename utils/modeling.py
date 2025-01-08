@@ -15,11 +15,23 @@ def plot_confusion_matrix(conf_matrix, class_labels, title="Aggregated Confusion
         class_labels (list or array): List of class labels for the confusion matrix.
         title (str): Title of the plot.
     """
-    disp = ConfusionMatrixDisplay(confusion_matrix=conf_matrix, display_labels=class_labels)
-    disp.plot(cmap='viridis', xticks_rotation=45)
-    plt.title(title)
-    plt.show()
+    fig, ax = plt.subplots(figsize=(3, 3))
     
+    disp = ConfusionMatrixDisplay(confusion_matrix=conf_matrix, display_labels=class_labels)
+    disp.plot(cmap='viridis', xticks_rotation=45, ax=ax, colorbar=False)
+    
+    ax.tick_params(axis='x', labelsize=6, length=0, width=0)
+    ax.tick_params(axis='y', labelsize=6, length=0, width=0)
+    
+    ax.set_xlabel("Predicted Labels", fontsize=6)
+    ax.set_ylabel("True Labels", fontsize=6)
+    
+    for text in disp.text_.ravel():
+        text.set_fontsize(8)
+    
+    ax.grid(False)
+    ax.set_title(title, fontsize=8)
+    plt.show()
 
 
 
@@ -60,25 +72,39 @@ def evaluate_models(resampled_data, models):
             y_pred = model.predict(X_val)
             results.append(classification_report(y_val, y_pred, output_dict=True))
             conf_matrices.append(confusion_matrix(y_val, y_pred))
-
-        # Aggregate metrics for the current model
+        
         metrics = ['precision', 'recall', 'f1-score']
         avg_results = {
             metric: {
-                cls: np.mean([fold[cls][metric] for fold in results if cls in fold]) 
-                for cls in map(str, column_mapping.keys())
+                cls: np.nanmean(
+                    [fold.get(cls, {}).get(metric, np.nan) for fold in results]
+                )
+                for cls in [str(key) for key in column_mapping.keys()]
             }
             for metric in metrics
         }
-        overall_accuracy = np.mean([fold['accuracy'] for fold in results])
 
-        # Create a DataFrame for metrics and rename columns
-        metrics_df = pd.DataFrame(avg_results).T
-        metrics_df.rename(columns=column_mapping, inplace=True)
-        metrics_df["Overall Accuracy"] = overall_accuracy
+        # Include overall accuracy
+        overall_accuracy = np.mean([fold.get('accuracy', np.nan) for fold in results])
+
+        # Format the metrics as rows with model name prefix
+        metrics_with_model_name = {
+            f"{model.__class__.__name__}_{metric}": [
+                avg_results[metric].get(cls, np.nan) for cls in column_mapping.keys()
+            ] + [overall_accuracy]
+            for metric in metrics
+        }
+
+        # Convert to DataFrame
+        metrics_df = pd.DataFrame.from_dict(
+            metrics_with_model_name, orient='index', 
+            columns=list(column_mapping.values()) + ["Overall Accuracy"]
+        )
+
+        # Save the DataFrame for the current model
         metrics_results[model.__class__.__name__] = metrics_df
 
-        # Aggregate confusion matrices
+        # # Aggregate confusion matrices
         aggregated_conf_matrix = np.sum(conf_matrices, axis=0)
         conf_matrices_results[model.__class__.__name__] = aggregated_conf_matrix
 
